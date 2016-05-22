@@ -1,198 +1,250 @@
-(function (app) {
+/* globals BookmarksNavigator, BookmarksEditor, Settings, Weather */
 'use strict';
 
-const {
-  bookmarks,
-  weather,
-  settings,
-} = app;
+class NewTab {
+  constructor() {
+    throw new TypeError('Static class cannot be instantiated.');
+  }
 
-const $root = document.documentElement;
-const $body = document.body;
-const $backgroundImage = document.querySelector('#background-image');
-const $time = document.querySelector('#time');
-const $greeting = document.querySelector('#greeting');
-const $bookmarksOpenButton = document.querySelector('#bookmarks-open-button');
-const $bookmarksCloseButton = document.querySelector('#bookmarks-close-button');
-const $bookmarksUpButton = document.querySelector('#bookmarks-up-button');
-const $bookmarksDrawerItems = document.querySelector('#bookmarks-drawer-items');
-const $drawerBackdrop = document.querySelector('#drawer-backdrop');
-const $weatherWrapper = document.querySelector('#weather-wrapper');
+  static get DEFAULT_IMAGE_URL() {
+    let screenPxWidth = window.screen.availWidth * window.devicePixelRatio;
+    let screenPxHeight = window.screen.availHeight * window.devicePixelRatio;
+    return 'https://source.unsplash.com/category/nature/' +
+           `${screenPxWidth}x${screenPxHeight}/`;
+  }
 
-const STORAGE_KEY_IMAGE_DATA_URL = 'imageDataURL';
+  static main() {
+    this.$root = document.documentElement;
+    this.$body = document.body;
+    this.$backgroundImage = document.querySelector('#background-image');
+    this.$time = document.querySelector('#time');
+    this.$greeting = document.querySelector('#greeting');
+    this.$weatherWrapper = document.querySelector('#weather-wrapper');
+    this.$bookmarksOpenButton =
+      document.querySelector('#bookmarks-open-button');
+    this.$bookmarksCloseButton =
+      document.querySelector('#bookmarks-close-button');
+    this.$bookmarksUpButton = document.querySelector('#bookmarks-up-button');
+    this.$bookmarksDrawerItems =
+      document.querySelector('#bookmarks-drawer-items');
+    this.$drawerBackdrop = document.querySelector('#drawer-backdrop');
 
-let screenPxWidth = window.screen.availWidth * window.devicePixelRatio;
-let screenPxHeight = window.screen.availHeight * window.devicePixelRatio;
-let imageResourceURI = 'https://source.unsplash.com/category/nature/' +
-                       `${screenPxWidth}x${screenPxHeight}/`;
+    const STORAGE_KEY_IMAGE_DATA_URL = 'imageDataURL';
 
-// Load cached image
-let backgroundImageReady = new Promise(resolve => {
-  chrome.storage.local.get(
-    STORAGE_KEY_IMAGE_DATA_URL,
-    ({ [STORAGE_KEY_IMAGE_DATA_URL]: url }) => resolve(url)
-  );
-})
-  .then(updateImage);
+    // Disable the right click menu
+    this.$root.addEventListener('contextmenu', ev => ev.preventDefault(), true);
 
-// Don't show anything until the settings and background image are ready
-Promise.all([settings.loaded, backgroundImageReady]).then(resolveBody);
+    // Load cached image
+    let backgroundImageReady = new Promise(resolve => {
+      chrome.storage.local.get(
+        STORAGE_KEY_IMAGE_DATA_URL,
+        ({ [STORAGE_KEY_IMAGE_DATA_URL]: uri }) => resolve(uri)
+      );
+    })
+      .then(uri => this.updateImage(uri));
 
-// Handle changes to settings
-settings.onChanged(settings.keys.ALWAYS_SHOW_BOOKMARKS)
-  .addListener(updateBookmarkDrawerLock);
-settings.onChanged(settings.keys.BOOKMARKS_DRAWER_SMALL)
-  .addListener(updateBookmarkDrawerSmall);
-settings.onChanged(settings.keys.BOOKMARKS_DRAWER_SMALL)
-  .addListener(bookmarks.updateSize);
-settings.onChanged(settings.keys.BOXED_INFO).addListener(updateBoxedInfo);
-settings.onChanged(settings.keys.SHOW_WEATHER).addListener(updateWeather);
-settings.onChanged(settings.keys.TEMPERATURE_UNIT)
-  .addListener(weather.updateTemperatureUnit);
+    // Don't show anything until the settings and background image are ready
+    Promise.all([Settings.loaded, backgroundImageReady]).then(() =>
+      this.resolveBody()
+    );
 
-// Update weather whenever cache changes
-weather.onDataLoad.addListener(() => {
-  updateWeather(settings.get(settings.keys.SHOW_WEATHER));
-});
+    // Handle changes to settings
+    Settings.onChanged(Settings.keys.ALWAYS_SHOW_BOOKMARKS)
+      .addListener(show => this.updateBookmarkDrawerLock(show));
 
-// Fetch and cache a new image in the background
-settings.loaded.then(() => {
-  if (settings.get(settings.keys.USE_TIME_OF_DAY_IMAGES)) {
-    let timeOfDay = getImageTimeOfDay();
-    if (timeOfDay) {
-      imageResourceURI += `?${timeOfDay}`;
+    Settings.onChanged(Settings.keys.BOOKMARKS_DRAWER_SMALL)
+      .addListener(small => {
+        this.updateBookmarkDrawerSmall(small);
+        BookmarksNavigator.updateSize(small);
+      });
+
+    Settings.onChanged(Settings.keys.BOXED_INFO)
+      .addListener(boxed =>
+        this.updateBoxedInfo(boxed)
+      );
+
+    Settings.onChanged(Settings.keys.SHOW_WEATHER)
+      .addListener(show =>
+        this.updateWeather(show)
+      );
+
+    Settings.onChanged(Settings.keys.TEMPERATURE_UNIT)
+      .addListener(unit => Weather.updateTemperatureUnit(unit));
+
+    // Update weather whenever cache changes
+    Weather.onDataLoad.addListener(() => {
+      let showWeather = Settings.get(Settings.keys.SHOW_WEATHER);
+      this.updateWeather(showWeather);
+    });
+
+    // Fetch and cache a new image in the background
+    Settings.loaded.then(() => {
+      let imageResourceURI = this.DEFAULT_IMAGE_URL;
+
+      if (Settings.get(Settings.keys.USE_TIME_OF_DAY_IMAGES)) {
+        let timeOfDay = this.getImageTimeOfDay();
+        if (timeOfDay) {
+          imageResourceURI += `?${timeOfDay}`;
+        }
+      }
+
+      chrome.runtime.getBackgroundPage(({ EventPage }) => {
+        EventPage.fetchAndCacheImage(imageResourceURI,
+                                     STORAGE_KEY_IMAGE_DATA_URL);
+      });
+    });
+
+    // Handle bookmarks navigation
+    this.$bookmarksUpButton.addEventListener('click', () =>
+      BookmarksNavigator.ascend()
+    );
+    this.$bookmarksDrawerItems.addEventListener('x-bookmark-click', ev => {
+      BookmarksNavigator.openBookmark(ev.detail.nodeId);
+    }, true);
+
+    // Handle bookmarks right click
+    this.$bookmarksDrawerItems.addEventListener('x-bookmark-ctx-open', ev => {
+      BookmarksEditor.openCtxMenu(ev.detail.x, ev.detail.y, ev.detail.nodeId);
+    }, true);
+    this.$bookmarksDrawerItems.addEventListener('contextmenu', ev => {
+      ev.preventDefault();
+      BookmarksEditor.openCtxMenu(ev.x, ev.y, null);
+    });
+
+    // Handle bookmark drag/drop events
+    this.$bookmarksDrawerItems.addEventListener(
+      'x-bookmark-drag-start',
+      ev => BookmarksEditor.onBookmarkDragStart(ev),
+      true
+    );
+    this.$bookmarksDrawerItems.addEventListener(
+      'x-bookmark-drag-over',
+      ev => BookmarksEditor.onBookmarkDragOver(ev),
+      true
+    );
+    this.$bookmarksDrawerItems.addEventListener(
+      'x-bookmark-drop',
+      ev => BookmarksEditor.onBookmarkDrop(ev),
+      true
+    );
+    this.$bookmarksDrawerItems.addEventListener(
+      'dragover',
+      ev => BookmarksEditor.onItemsDragOver(ev)
+    );
+    this.$bookmarksDrawerItems.addEventListener(
+      'drop',
+      ev => BookmarksEditor.onItemsDrop(ev)
+    );
+    this.$bookmarksDrawerItems.addEventListener(
+      'dragleave',
+      ev => BookmarksEditor.onDragLeave(ev),
+      true
+    );
+    this.$bookmarksDrawerItems.addEventListener(
+      'dragend',
+      ev => BookmarksEditor.onDragEnd(ev),
+      true
+    );
+
+    // Update the clock immediately, then once every second forever
+    this.updateTime();
+    setInterval(() => this.updateTime(), 1000);
+
+    // Handle opening and closing the bookmarks drawer
+    this.$bookmarksOpenButton.addEventListener('click', () =>
+      this.openBookmarks()
+    );
+    this.$bookmarksCloseButton.addEventListener('click', () =>
+      this.closeBookmarks()
+    );
+    this.$drawerBackdrop.addEventListener('click', () =>
+      this.closeBookmarks()
+    );
+  }
+
+  static getImageTimeOfDay() {
+    let hour = new Date().getHours();
+    if (hour < 5 || 22 <= hour) {
+      // 10pm - 5am
+      return 'night';
+    } else if (5 <= hour && hour < 10) {
+      // 5am - 10am
+      return 'morning';
+    } else if (18 <= hour && hour < 22) {
+      // 6pm - 10pm
+      return 'evening';
     }
   }
 
-  chrome.runtime.getBackgroundPage(eventPage => {
-    eventPage.fetchAndCacheImage(imageResourceURI, STORAGE_KEY_IMAGE_DATA_URL);
-  });
-});
+  static updateImage(uri = this.DEFAULT_IMAGE_URL) {
+    this.$backgroundImage.src = uri;
+  }
 
-// Handle bookmarks navigation
-$bookmarksUpButton.addEventListener('click', bookmarks.ascend);
-$bookmarksDrawerItems.addEventListener('bookmark-clicked', event => {
-  bookmarks.openNode(event.detail.node);
-}, true);
+  static updateTime() {
+    let date = new Date();
+    let hours = date.getHours();
+    let minutes = date.getMinutes();
 
-// Update the clock immediately, then once every second forever
-updateTime();
-setInterval(updateTime, 1000);
+    let minutesStr = String(minutes);
+    if (minutesStr.length < 2) {
+      minutesStr = `0${minutesStr}`;
+    }
 
-// Handle opening and closing the bookmarks drawer
-let drawerAnimationDuration = 200;
-let backdropAnimationKeyframes = [
-  { opacity: 0 },
-  { opacity: 0.5 },
-];
-let backdropAnimator;
-$root.style.setProperty('--drawer-transition-duration',
-                        `${drawerAnimationDuration}ms`);
-$bookmarksOpenButton.addEventListener('click', openBookmarks);
-$bookmarksCloseButton.addEventListener('click', closeBookmarks);
-$drawerBackdrop.addEventListener('click', closeBookmarks);
+    this.$time.textContent = `${hours % 12 || 12}:${minutesStr}`;
 
-function getImageTimeOfDay() {
-  let hour = new Date().getHours();
-  if (hour < 5 || 22 <= hour) {
-    // 10pm - 5am
-    return 'night';
-  } else if (5 <= hour && hour < 10) {
-    // 5am - 10am
-    return 'morning';
-  } else if (18 <= hour && hour < 22) {
-    // 6pm - 10pm
-    return 'evening';
+    let greeting;
+    if (hours >= 0 && hours < 12) {
+      greeting = 'Good Morning';
+    } else if (hours >= 12 && hours < 18) {
+      greeting = 'Good Afternoon';
+    } else {
+      greeting = 'Good Evening';
+    }
+
+    this.$greeting.textContent = greeting;
+  }
+
+  static openBookmarks() {
+    this.$root.classList.add('bookmarks-drawer-open');
+  }
+
+  static closeBookmarks() {
+    this.$root.classList.remove('bookmarks-drawer-open');
+  }
+
+  static updateBookmarkDrawerLock(alwaysShowBookmarks) {
+    this.closeBookmarks();
+    this.$root.classList.toggle('bookmarks-drawer-locked-open',
+                                alwaysShowBookmarks);
+  }
+
+  static updateBookmarkDrawerSmall(drawerSmall) {
+    this.$root.classList.toggle('bookmarks-drawer-small', drawerSmall);
+  }
+
+  static updateBoxedInfo(boxedInfo) {
+    this.$root.classList.toggle('boxed-info', boxedInfo);
+  }
+
+  static updateWeather(showWeather) {
+    if (showWeather) {
+      return Weather.load().then(() => this.$weatherWrapper.hidden = false);
+    } else {
+      this.$weatherWrapper.hidden = true;
+      return Promise.resolve();
+    }
+  }
+
+  static resolveBody() {
+    this.$body.removeAttribute('unresolved');
+    this.$body.animate([
+        { opacity: 0 },
+        { opacity: 1 },
+      ], {
+        duration: 200,
+        easing: 'cubic-bezier(0.215, 0.61, 0.355, 1)',
+      });
   }
 }
 
-function updateImage(url = imageResourceURI) {
-  $backgroundImage.src = url;
-}
-
-function updateTime() {
-  let date = new Date();
-  let hours = date.getHours();
-  let minutes = date.getMinutes();
-
-  let minutesStr = String(minutes);
-  if (minutesStr.length < 2) {
-    minutesStr = `0${minutesStr}`;
-  }
-
-  $time.textContent = `${hours % 12 || 12}:${minutesStr}`;
-
-  let greeting;
-  if (hours >= 0 && hours < 12) {
-    greeting = 'Good Morning';
-  } else if (hours >= 12 && hours < 18) {
-    greeting = 'Good Afternoon';
-  } else {
-    greeting = 'Good Evening';
-  }
-
-  $greeting.textContent = greeting;
-}
-
-function openBookmarks() {
-  $root.classList.add('bookmarks-drawer-open');
-  if (backdropAnimator) {
-    backdropAnimator.cancel();
-  }
-
-  $drawerBackdrop.style.display = 'block';
-  backdropAnimator = $drawerBackdrop.animate(backdropAnimationKeyframes, {
-    duration: drawerAnimationDuration,
-    fill: 'both',
-  });
-}
-
-function closeBookmarks() {
-  $root.classList.remove('bookmarks-drawer-open');
-  if (backdropAnimator) {
-    backdropAnimator.cancel();
-  }
-
-  backdropAnimator = $drawerBackdrop.animate(backdropAnimationKeyframes, {
-    duration: drawerAnimationDuration,
-    fill: 'both',
-    direction: 'reverse',
-  });
-
-  backdropAnimator.onfinish = () => $drawerBackdrop.style.display = 'none';
-}
-
-function updateBookmarkDrawerLock(alwaysShowBookmarks) {
-  closeBookmarks();
-  $root.classList.toggle('bookmarks-drawer-locked-open', alwaysShowBookmarks);
-}
-
-function updateBookmarkDrawerSmall(drawerSmall) {
-  $root.classList.toggle('bookmarks-drawer-small', drawerSmall);
-}
-
-function updateBoxedInfo(boxedInfo) {
-  $root.classList.toggle('boxed-info', boxedInfo);
-}
-
-function updateWeather(showWeather) {
-  if (showWeather) {
-    return weather.load().then(() => $weatherWrapper.hidden = false);
-  } else {
-    $weatherWrapper.hidden = true;
-    return Promise.resolve();
-  }
-}
-
-function resolveBody() {
-  $body.removeAttribute('unresolved');
-  $body.animate([
-      { opacity: 0 },
-      { opacity: 1 },
-    ], {
-      duration: 200,
-      easing: 'cubic-bezier(0.215, 0.61, 0.355, 1)',
-    });
-}
-
-})(window.app = window.app || {});
+NewTab.main();

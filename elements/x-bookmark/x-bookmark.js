@@ -1,36 +1,37 @@
-(function (app) {
 'use strict';
 
-const $tmpl = document.currentScript.ownerDocument.querySelector('template');
+class XBookmarkElement extends HTMLElement {
+  static register() {
+    this.$tmpl = document.currentScript.ownerDocument.querySelector('template');
+    document.registerElement('x-bookmark', this);
+  }
 
-class XBookmark extends HTMLElement {
   createdCallback() {
-    let tmplRoot = document.importNode($tmpl.content, true);
+    let tmplRoot = document.importNode(XBookmarkElement.$tmpl.content, true);
     this.createShadowRoot().appendChild(tmplRoot);
 
     this.$link = this.shadowRoot.querySelector('#link');
     this.$image = this.shadowRoot.querySelector('#image');
     this.$name = this.shadowRoot.querySelector('#name');
 
+    this.small = false;
     this.node = null;
-    this.dataset.small = 'false';
 
-    this.updateImage();
-    this.updateTooltip();
+    this.setAttribute('draggable', 'true');
 
-    this.addEventListener('click', () => {
-      let customEvent = new CustomEvent('bookmark-clicked', {
-        detail: { node: this._node },
-      });
-
-      requestAnimationFrame(() => this.dispatchEvent(customEvent));
-    });
+    this.addEventListener('click', () => this.onClick());
+    this.addEventListener('contextmenu', ev => this.onContextMenu(ev));
+    this.addEventListener('dragstart', ev => this.onDragStart(ev));
+    this.addEventListener('dragover', ev => this.onDragOver(ev));
+    this.addEventListener('dragenter', ev => this.onDragOver(ev));
+    this.addEventListener('dragend', ev => this.onDragEnd(ev));
+    this.addEventListener('drop', ev => this.onDrop(ev));
   }
 
   attributeChangedCallback(attrName) {
     switch (attrName) {
-      case 'data-small':
-        this.updateTooltip();
+      case 'small':
+        this._updateTooltip();
         break;
     }
   }
@@ -41,8 +42,8 @@ class XBookmark extends HTMLElement {
 
   set node(node) {
     this._node = node;
-    this.updateImage();
-    this.updateTooltip();
+    this._updateImage();
+    this._updateTooltip();
 
     this.$link.href = this.url;
     this.$name.textContent = this.name;
@@ -56,7 +57,76 @@ class XBookmark extends HTMLElement {
     return this.node ? (this.node.url || '#') : '#';
   }
 
-  updateImage() {
+  get small() {
+    return this.hasAttribute('small');
+  }
+
+  set small(small) {
+    if (small) {
+      this.setAttribute('small', '');
+    } else {
+      this.removeAttribute('small');
+    }
+  }
+
+  onClick() {
+    let customEvent = new CustomEvent('x-bookmark-click', {
+      detail: { nodeId: this._node.id },
+    });
+
+    requestAnimationFrame(() => this.dispatchEvent(customEvent));
+  }
+
+  onContextMenu(ev) {
+    let customEvent = new CustomEvent('x-bookmark-ctx-open', {
+      detail: {
+        nodeId: this._node.id,
+        x: ev.x,
+        y: ev.y,
+      },
+    });
+
+    requestAnimationFrame(() => this.dispatchEvent(customEvent));
+
+    ev.preventDefault();
+  }
+
+  onDragStart(ev) {
+    requestAnimationFrame(() => this.classList.add('dragging'));
+
+    ev.dataTransfer.setDragImage(this, ev.offsetX, ev.offsetY);
+    ev.dataTransfer.setData('text/x-bookmark-id', this.node.id);
+
+    let customEvent = new CustomEvent('x-bookmark-drag-start');
+    this.dispatchEvent(customEvent);
+  }
+
+  onDragOver(ev) {
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'move';
+
+    let customEvent = new CustomEvent('x-bookmark-drag-over');
+    this.dispatchEvent(customEvent);
+  }
+
+  onDragEnd() {
+    requestAnimationFrame(() => this.classList.remove('dragging'));
+  }
+
+  onDrop(ev) {
+    ev.preventDefault();
+
+    let bookmarkId = ev.dataTransfer.getData('text/x-bookmark-id') || null;
+    let title = ev.dataTransfer.getData('text/plain');
+    let url = ev.dataTransfer.getData('text/uri-list') || title;
+    let customEvent = new CustomEvent('x-bookmark-drop', {
+      detail: { bookmarkId, title, url },
+    });
+
+    this.dispatchEvent(customEvent);
+  }
+
+  _updateImage() {
     if (this.node && !this.node.url) {
       this.$image.src = '/images/folder-outline.svg';
     } else {
@@ -64,8 +134,8 @@ class XBookmark extends HTMLElement {
     }
   }
 
-  updateTooltip() {
-    if (this.dataset.small === 'true') {
+  _updateTooltip() {
+    if (this.small) {
       this.title = this.name;
     } else {
       this.title = '';
@@ -73,6 +143,4 @@ class XBookmark extends HTMLElement {
   }
 }
 
-app.XBookmark = document.registerElement('x-bookmark', XBookmark);
-
-})(window.app = window.app || {});
+XBookmarkElement.register();
