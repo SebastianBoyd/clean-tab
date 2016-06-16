@@ -1,0 +1,66 @@
+:root {
+  --small-input-size: 14px;
+  --small-input-margin: 4px;
+}
+
+body {
+  width: 220px;
+  user-select: none;
+  font-size: .8rem;
+  font-weight: 400;
+}
+
+h1 {
+  font-size: 1rem;
+  cursor: default;
+}
+
+h2 {
+  font-size: inherit;
+  cursor: default;
+  font-weight: inherit;
+  margin: 4px 0;
+}
+
+input[type=checkbox],
+input[type=radio] {
+  width: var(--small-input-size);
+  height: var(--small-input-size);
+  margin: var(--small-input-margin);
+}
+
+input[disabled] + label {
+  color: #545454;
+}
+
+.small-input-container {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+.small-input-container.inline {
+  display: inline-flex;
+}
+
+.small-input-container label {
+  line-height: 14px;
+  padding: 4px;
+}
+
+.child {
+  margin-left: calc(var(--small-input-size) + var(--small-input-margin) * 2);
+}
+
+#settings {
+  margin: 8px;
+}
+
+#github {
+  display: block;
+  font-weight: bold;
+  text-align: center;
+  color: #333;
+  background-color: #f0f0f0;
+  padding: 8px;
+}
